@@ -187,21 +187,32 @@ check("still 2 hidden cards", A(s).cards.filter(c => !c.revealed).length === 2);
 check("deck size conserved", s.deck.length === deckSize);
 check("turn advanced", s.players[s.turnIdx].id === "p1");
 
-// ---------- T10: mandatory coup & win ----------
-console.log("T10 mandatory coup at 10+ coins; win detection");
+// ---------- T10: guess-the-card coup, mandatory coup & win ----------
+console.log("T10 coup requires a guess; right guess removes that card");
 s = newGame(2);
 A(s).coins = 10;
 check("non-coup rejected at 10 coins", G.doAction(s, "p0", "income") === false);
+check("coup without a guess rejected", G.doAction(s, "p0", "coup", "p1") === false);
+check("coup with a bogus guess rejected", G.doAction(s, "p0", "coup", "p1", "Joker") === false);
 B(s).cards = [{ role: "Duke", revealed: true }, { role: "Contessa", revealed: false }];
-G.doAction(s, "p0", "coup", "p1");
+G.doAction(s, "p0", "coup", "p1", "Contessa");
 check("coup cost paid", A(s).coins === 3);
-check("game over, p0 wins", s.phase === "over" && s.winnerId === "p0");
+check("guessed card revealed → game over, p0 wins", s.phase === "over" && s.winnerId === "p0");
+
+console.log("T10b wrong guess → coup fails, coins still spent");
+s = newGame(2);
+A(s).coins = 7;
+B(s).cards = [{ role: "Duke", revealed: false }, { role: "Captain", revealed: false }];
+G.doAction(s, "p0", "coup", "p1", "Contessa");
+check("7 coins spent on the failed coup", A(s).coins === 0);
+check("target untouched", B(s).cards.every(c => !c.revealed));
+check("turn passed to p1", s.players[s.turnIdx].id === "p1" && s.phase === "action");
 
 // ---------- T11: illegal intents are rejected ----------
 console.log("T11 validation");
 s = newGame(3);
 check("out-of-turn action rejected", G.doAction(s, "p1", "income") === false);
-check("coup without coins rejected", G.doAction(s, "p0", "coup", "p1") === false);
+check("coup without coins rejected", G.doAction(s, "p0", "coup", "p1", "Duke") === false);
 check("self-target rejected", G.doAction(s, "p0", "steal", "p0") === false);
 G.doAction(s, "p0", "tax");
 check("actor cannot pass own window", G.doPass(s, "p0") === false);

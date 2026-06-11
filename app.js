@@ -27,24 +27,24 @@ const DECIDE_SECONDS   = 30; // pick a card to lose / exchange picks
 const CODE_ALPHABET = "ACDEFGHJKMNPQRTUVWXYZ234679";
 
 const ACTIONS = {
-  income:      { label: "Income — take 1 coin",                       cost: 0, targeted: false, claim: null,         blockRoles: [] },
-  foreign_aid: { label: "Foreign aid — take 2 coins",                 cost: 0, targeted: false, claim: null,         blockRoles: ["Duke"] },
-  coup:        { label: "Coup — pay 7, target loses a card",          cost: 7, targeted: true,  claim: null,         blockRoles: [] },
-  tax:         { label: "Tax — claim Duke, take 3 coins",             cost: 0, targeted: false, claim: "Duke",       blockRoles: [] },
-  assassinate: { label: "Assassinate — claim Assassin, pay 3",        cost: 3, targeted: true,  claim: "Assassin",   blockRoles: ["Contessa"] },
-  steal:       { label: "Steal — claim Captain, take 2 from a player",cost: 0, targeted: true,  claim: "Captain",    blockRoles: ["Captain", "Ambassador"] },
-  exchange:    { label: "Exchange — claim Ambassador, swap cards",    cost: 0, targeted: false, claim: "Ambassador", blockRoles: [] },
+  income:      { label: "Income", sub: "+1 coin · safe",              cost: 0, targeted: false, claim: null,         blockRoles: [] },
+  foreign_aid: { label: "Foreign aid", sub: "+2 · Duke can block",    cost: 0, targeted: false, claim: null,         blockRoles: ["Duke"] },
+  coup:        { label: "Coup", sub: "pay 7 · guess a card",          cost: 7, targeted: true,  claim: null,         blockRoles: [], guess: true },
+  tax:         { label: "Tax", sub: "+3 · claim Duke",                cost: 0, targeted: false, claim: "Duke",       blockRoles: [] },
+  assassinate: { label: "Assassinate", sub: "pay 3 · claim Assassin", cost: 3, targeted: true,  claim: "Assassin",   blockRoles: ["Contessa"] },
+  steal:       { label: "Steal", sub: "take 2 · claim Captain",       cost: 0, targeted: true,  claim: "Captain",    blockRoles: ["Captain", "Ambassador"] },
+  exchange:    { label: "Exchange", sub: "swap · claim Ambassador",   cost: 0, targeted: false, claim: "Ambassador", blockRoles: [] },
 };
 
 function actionPhrase(action, targetName) {
   switch (action) {
-    case "income":      return "take Income (1 coin)";
-    case "foreign_aid": return "take Foreign aid (2 coins)";
-    case "coup":        return `launch a Coup against ${targetName}`;
-    case "tax":         return "take Tax as Duke (3 coins)";
-    case "assassinate": return `assassinate ${targetName} (claiming Assassin)`;
-    case "steal":       return `steal 2 coins from ${targetName} (claiming Captain)`;
-    case "exchange":    return "exchange cards (claiming Ambassador)";
+    case "income":      return "take Income";
+    case "foreign_aid": return "take Foreign aid (+2)";
+    case "coup":        return `coup ${targetName}`;
+    case "tax":         return "take Tax as Duke (+3)";
+    case "assassinate": return `assassinate ${targetName}`;
+    case "steal":       return `steal 2 from ${targetName}`;
+    case "exchange":    return "exchange cards as Ambassador";
     default:            return action;
   }
 }
@@ -107,9 +107,10 @@ function el(html) {
   return t.content.firstElementChild;
 }
 
-const BTN_PRIMARY = "min-h-[64px] w-full text-2xl font-bold bg-sun text-ink border-4 border-sun rounded-xl px-5 py-3 hover:brightness-110";
-const BTN_NEUTRAL = "min-h-[64px] w-full text-2xl font-bold bg-panel text-mist border-4 border-mist rounded-xl px-5 py-3 hover:bg-line/40";
-const BTN_DANGER  = "min-h-[64px] w-full text-2xl font-bold bg-panel text-alert border-4 border-alert rounded-xl px-5 py-3 hover:bg-line/40";
+const BTN_PRIMARY = "min-h-[48px] w-full text-base font-bold bg-sun text-ink rounded-lg px-3 py-2 text-left hover:brightness-110";
+const BTN_NEUTRAL = "min-h-[48px] w-full text-base font-bold bg-card text-mist border border-line rounded-lg px-3 py-2 text-left hover:border-mist";
+const BTN_DANGER  = "min-h-[48px] w-full text-base font-bold bg-card text-alert border border-alert/60 rounded-lg px-3 py-2 text-left hover:border-alert";
+const BTN_BACK    = "min-h-[40px] w-full text-sm font-bold text-dim bg-transparent border border-line rounded-lg px-3 py-1.5 text-left hover:text-mist hover:border-mist";
 
 /* ---------------- 4. Landing: create / join ---------------- */
 
@@ -367,24 +368,20 @@ function hostHandleTimeout() {
   const s = session.hostState;
   switch (s.phase) {
     case "reaction":
-      hostLog("Time is up — no one reacted.");
       resolveAction(s);
       break;
     case "block_reaction":
-      hostLog("Time is up — the block stands.");
       blockSucceeds(s);
       break;
     case "lose_card": {
       const p = byId(s, s.losingId);
       const idx = p.cards.findIndex((c) => !c.revealed);
-      hostLog(`Time is up — ${p.name} loses a card automatically.`);
       revealCard(s, p, idx);
       continueAfterReveal(s);
       break;
     }
     case "exchange": {
-      hostLog("Time is up — the exchange keeps the original cards.");
-      finishExchange(s, null); // null → keep current hand
+      finishExchange(s, null); // null -> keep current hand
       break;
     }
     default:
@@ -404,8 +401,7 @@ function hostHandleIntent(intent) {
     if (session.roster.length < 2 || session.roster.length > 6) return;
     session.hostState = freshState(session.roster);
     const s = session.hostState;
-    hostLog(`Game started with ${s.players.length} players. Turn order: ${s.players.map((p) => p.name).join(", ")}.`);
-    hostLog(`It is ${currentPlayer(s).name}'s turn.`);
+    hostLog(`Game on — turn order: ${s.players.map((p) => p.name).join(" → ")}.`);
     hostPush();
     return;
   }
@@ -417,7 +413,7 @@ function hostHandleIntent(intent) {
 
   let changed = false;
   switch (type) {
-    case "action":        changed = doAction(s, from, intent.action, intent.target); break;
+    case "action":        changed = doAction(s, from, intent.action, intent.target, intent.guess); break;
     case "pass":          changed = doPass(s, from); break;
     case "challenge":     changed = doChallenge(s, from); break;
     case "block":         changed = doBlock(s, from, intent.role); break;
@@ -429,7 +425,7 @@ function hostHandleIntent(intent) {
 
 /* ----- Action declaration ----- */
 
-function doAction(s, pid, action, targetId) {
+function doAction(s, pid, action, targetId, guess) {
   if (s.phase !== "action") return false;
   if (currentPlayer(s).id !== pid) return false;
   const spec = ACTIONS[action];
@@ -438,6 +434,7 @@ function doAction(s, pid, action, targetId) {
 
   if (actor.coins >= 10 && action !== "coup") return false;     // mandatory coup
   if (actor.coins < spec.cost) return false;
+  if (spec.guess && !ROLES.includes(guess)) return false;
 
   let target = null;
   if (spec.targeted) {
@@ -450,14 +447,22 @@ function doAction(s, pid, action, targetId) {
 
   if (action === "income") {
     actor.coins += 1;
-    hostLog(`${actor.name} takes Income (+1 coin, now ${actor.coins}).`);
+    hostLog(`${actor.name}: Income → ${actor.coins} coins.`);
     endTurn(s);
     return true;
   }
 
   if (action === "coup") {
-    hostLog(`${actor.name} pays 7 coins to launch a Coup against ${target.name}. It cannot be blocked.`);
-    enqueueLoss(s, target.id, "end");
+    // House rule: the attacker names a card. Right → that card is lost.
+    // Wrong → the coup fails (the 7 coins are spent either way).
+    const idx = target.cards.findIndex((c) => !c.revealed && c.role === guess);
+    if (idx >= 0) {
+      hostLog(`${actor.name} coups ${target.name}, guessing ${guess} — correct!`);
+      revealCard(s, target, idx);
+    } else {
+      hostLog(`${actor.name} coups ${target.name}, guessing ${guess} — wrong. The coup fails.`);
+    }
+    endTurn(s);
     return true;
   }
 
@@ -473,9 +478,7 @@ function doAction(s, pid, action, targetId) {
   s.phase = "reaction";
   s.deadlineAt = Date.now() + REACTION_SECONDS * 1000;
 
-  const phrase = actionPhrase(action, target ? target.name : "");
-  if (spec.claim) hostLog(`${actor.name} wants to ${phrase}. ${REACTION_SECONDS} seconds to challenge${spec.blockRoles.length ? " or block" : ""}.`);
-  else hostLog(`${actor.name} wants to ${phrase}. ${REACTION_SECONDS} seconds to block.`);
+  hostLog(`${actor.name}: ${actionPhrase(action, target ? target.name : "")}.`);
   return true;
 }
 
@@ -519,13 +522,8 @@ function doPass(s, pid) {
   if (!eligible.includes(pid) || s.pending.passes.includes(pid)) return false;
   s.pending.passes.push(pid);
   if (eligible.every((id) => s.pending.passes.includes(id))) {
-    if (s.phase === "reaction") {
-      hostLog("Everyone passed.");
-      resolveAction(s);
-    } else {
-      hostLog("Everyone passed — the block stands.");
-      blockSucceeds(s);
-    }
+    if (s.phase === "reaction") resolveAction(s);
+    else blockSucceeds(s);
   }
   return true;
 }
@@ -539,7 +537,7 @@ function doBlock(s, pid, role) {
   s.phase = "block_reaction";
   s.pending.passes = [];
   s.deadlineAt = Date.now() + REACTION_SECONDS * 1000;
-  hostLog(`${blocker.name} claims ${role} to block. ${REACTION_SECONDS} seconds to challenge.`);
+  hostLog(`${blocker.name} blocks with ${role}.`);
   return true;
 }
 
@@ -563,19 +561,19 @@ function doChallenge(s, pid) {
     bluffCont = "resolve_action";
   }
 
-  hostLog(`${challenger.name} challenges ${accused.name}'s claim of ${claimedRole}!`);
+  hostLog(`${challenger.name} challenges ${accused.name}'s ${claimedRole}!`);
   const idx = accused.cards.findIndex((c) => !c.revealed && c.role === claimedRole);
 
   if (idx >= 0) {
     // Proof: show the card, shuffle it back, draw a replacement, challenger loses a card
-    hostLog(`${accused.name} reveals ${claimedRole} — the challenge fails. The card is shuffled back and replaced.`);
+    hostLog(`${accused.name} shows ${claimedRole} — challenge fails. Card replaced.`);
     s.deck.push(claimedRole);
     shuffle(s.deck);
     accused.cards[idx] = { role: s.deck.pop(), revealed: false };
     s.continuation = provedCont;
     enqueueLoss(s, challenger.id, null /* continuation already set */);
   } else {
-    hostLog(`${accused.name} was bluffing and does not show ${claimedRole}.`);
+    hostLog(`${accused.name} was bluffing!`);
     s.continuation = bluffCont;
     enqueueLoss(s, accused.id, null);
   }
@@ -583,9 +581,8 @@ function doChallenge(s, pid) {
 }
 
 function blockSucceeds(s) {
-  const { action, actorId } = s.pending;
-  const actor = byId(s, actorId);
-  hostLog(`${actor.name}'s ${action.replace("_", " ")} is blocked and has no effect.`);
+  const actor = byId(s, s.pending.actorId);
+  hostLog(`${actor.name}'s ${s.pending.action.replace("_", " ")} is blocked.`);
   endTurn(s);
 }
 
@@ -614,7 +611,6 @@ function processLossQueue(s) {
     s.phase = "lose_card";
     s.losingId = pid;
     s.deadlineAt = Date.now() + DECIDE_SECONDS * 1000;
-    hostLog(`${p.name} must choose a card to lose (${DECIDE_SECONDS} seconds).`);
     return false;
   }
   runContinuation(s);
@@ -640,8 +636,8 @@ function continueAfterReveal(s) {
 
 function revealCard(s, p, idx) {
   p.cards[idx].revealed = true;
-  hostLog(`${p.name} loses influence and turns ${p.cards[idx].role} face up.`);
-  if (!isAlive(p)) hostLog(`${p.name} has no influence left and is out of the game.`);
+  hostLog(`${p.name} loses ${p.cards[idx].role}.`);
+  if (!isAlive(p)) hostLog(`${p.name} is out.`);
 }
 
 function runContinuation(s) {
@@ -661,7 +657,6 @@ function runContinuation(s) {
         s.pending.canChallenge = false;
         s.pending.passes = [];
         s.deadlineAt = Date.now() + REACTION_SECONDS * 1000;
-        hostLog(`${target.name} may still block (${spec.blockRoles.join(" or ")}). ${REACTION_SECONDS} seconds.`);
       } else {
         resolveAction(s);
       }
@@ -671,12 +666,9 @@ function runContinuation(s) {
       blockSucceeds(s);
       break;
     }
-    case "action_fails": {
-      const actor = byId(s, s.pending ? s.pending.actorId : null) || currentPlayer(s);
-      hostLog(`${actor.name}'s action fails.`);
+    case "action_fails":
       endTurn(s);
       break;
-    }
     case "end":
     default:
       endTurn(s);
@@ -694,12 +686,12 @@ function resolveAction(s) {
   switch (action) {
     case "foreign_aid":
       actor.coins += 2;
-      hostLog(`${actor.name} takes Foreign aid (+2 coins, now ${actor.coins}).`);
+      hostLog(`${actor.name} +2 → ${actor.coins} coins.`);
       endTurn(s);
       break;
     case "tax":
       actor.coins += 3;
-      hostLog(`${actor.name} takes Tax (+3 coins, now ${actor.coins}).`);
+      hostLog(`${actor.name} +3 → ${actor.coins} coins.`);
       endTurn(s);
       break;
     case "steal": {
@@ -707,19 +699,18 @@ function resolveAction(s) {
         const amt = Math.min(2, target.coins);
         target.coins -= amt;
         actor.coins += amt;
-        hostLog(`${actor.name} steals ${amt} coin${amt === 1 ? "" : "s"} from ${target.name}.`);
+        hostLog(`${actor.name} steals ${amt} from ${target.name}.`);
       } else {
-        hostLog(`The steal has no target left and fizzles.`);
+        hostLog(`The steal fizzles — no target left.`);
       }
       endTurn(s);
       break;
     }
     case "assassinate": {
       if (target && isAlive(target)) {
-        hostLog(`The assassination of ${target.name} goes through.`);
+        hostLog(`The assassination lands.`);
         enqueueLoss(s, target.id, "end");
       } else {
-        hostLog(`The assassination target is already out; nothing happens.`);
         endTurn(s);
       }
       break;
@@ -729,7 +720,6 @@ function resolveAction(s) {
       s.exchange = { playerId: actorId, drawn };
       s.phase = "exchange";
       s.deadlineAt = Date.now() + DECIDE_SECONDS * 1000;
-      hostLog(`${actor.name} draws 2 cards for the Exchange and is choosing what to keep (${DECIDE_SECONDS} seconds).`);
       break;
     }
     default:
@@ -765,7 +755,7 @@ function finishExchange(s, keepIndices) {
   s.deck.push(...returned);
   shuffle(s.deck);
   s.exchange = null;
-  hostLog(`${p.name} finishes the Exchange and returns 2 cards to the deck.`);
+  hostLog(`${p.name} exchanged cards.`);
   endTurn(s);
 }
 
@@ -783,7 +773,7 @@ function endTurn(s) {
   if (alive.length === 1) {
     s.phase = "over";
     s.winnerId = alive[0].id;
-    hostLog(`${alive[0].name} wins the game! 🏆`);
+    hostLog(`🏆 ${alive[0].name} wins!`);
     return;
   }
 
@@ -791,8 +781,6 @@ function endTurn(s) {
   do { i = (i + 1) % s.players.length; } while (!isAlive(s.players[i]));
   s.turnIdx = i;
   s.phase = "action";
-  const p = currentPlayer(s);
-  hostLog(`It is ${p.name}'s turn.${p.coins >= 10 ? " They have 10+ coins and must Coup." : ""}`);
 }
 
 /* ============================================================
@@ -821,9 +809,9 @@ function renderLobby() {
     const isHost = p.id === session.game.host_player_id;
     const isMe = p.id === session.playerId;
     ul.appendChild(el(`
-      <li class="border-4 border-line rounded-xl px-4 py-3 bg-panel flex justify-between gap-3">
-        <span class="font-bold">${esc(p.name)}${isMe ? " (you)" : ""}</span>
-        <span>${isHost ? "★ Host" : ""}</span>
+      <li class="border border-line rounded-lg px-3 py-2 bg-panel flex justify-between gap-2">
+        <span class="font-bold truncate">${esc(p.name)}${isMe ? " (you)" : ""}</span>
+        ${isHost ? `<span class="text-sun shrink-0">★</span>` : ""}
       </li>`));
   }
 
@@ -863,35 +851,35 @@ function renderBanner(s, me, turnP) {
   switch (s.phase) {
     case "action":
       text = turnP.id === session.playerId
-        ? "Your turn — choose an action below."
-        : `${turnP.name}'s turn — they are choosing an action.`;
+        ? "▶ Your turn"
+        : `${turnP.name} is choosing an action…`;
       break;
     case "reaction": {
       const { action, actorId, targetId, canChallenge } = s.pending;
       const phrase = actionPhrase(action, targetId ? youOr(s, targetId, false) : "");
-      const opts = actorId === session.playerId
-        ? "Waiting to see if anyone reacts."
-        : (canChallenge ? "Challenge or block now, or pass." : "Block now, or pass.");
-      text = `${youOr(s, actorId)} want${actorId === session.playerId ? "" : "s"} to ${phrase}. ${opts}`;
+      const tail = actorId === session.playerId
+        ? " — waiting for reactions"
+        : (canChallenge ? "" : "");
+      text = `${youOr(s, actorId)} want${actorId === session.playerId ? "" : "s"} to ${phrase}${tail}`;
       break;
     }
     case "block_reaction": {
       const { block } = s.pending;
-      text = `${youOr(s, block.by)} claim${block.by === session.playerId ? "" : "s"} ${block.role} to block. Challenge or pass.`;
+      text = `${youOr(s, block.by)} block${block.by === session.playerId ? "" : "s"} with ${block.role}`;
       break;
     }
     case "lose_card":
       text = s.losingId === session.playerId
-        ? "You must choose one of your cards to lose."
-        : `${nameOf(s, s.losingId)} is choosing a card to lose.`;
+        ? "Choose a card to lose"
+        : `${nameOf(s, s.losingId)} is choosing a card to lose…`;
       break;
     case "exchange":
       text = s.exchange.playerId === session.playerId
-        ? "Exchange: choose which cards to keep."
-        : `${nameOf(s, s.exchange.playerId)} is exchanging cards.`;
+        ? "Exchange — pick your cards"
+        : `${nameOf(s, s.exchange.playerId)} is exchanging cards…`;
       break;
     case "over":
-      text = `Game over — ${youOr(s, s.winnerId)} win${s.winnerId === session.playerId ? "" : "s"}! 🏆`;
+      text = `🏆 ${youOr(s, s.winnerId)} win${s.winnerId === session.playerId ? "" : "s"}!`;
       break;
   }
   b.textContent = text;
@@ -901,7 +889,7 @@ function renderCountdown(s) {
   const wrap = $("countdown-wrap");
   if (!s.deadlineAt || s.phase === "over") { wrap.hidden = true; return; }
   wrap.hidden = false;
-  tickCountdown(); // immediate paint; interval keeps it fresh
+  tickCountdown();
 }
 
 let countdownInterval = setInterval(tickCountdown, 250);
@@ -916,14 +904,13 @@ function tickCountdown() {
   if (ruler.childElementCount !== total) {
     ruler.innerHTML = "";
     for (let i = 0; i < total; i++) {
-      ruler.appendChild(el(`<span class="tick h-5 flex-1 rounded-sm bg-sun"></span>`));
+      ruler.appendChild(el(`<span class="tick h-1.5 flex-1 rounded-full bg-sun"></span>`));
     }
   }
-  [...ruler.children].forEach((t, i) => { t.style.opacity = i < left ? "1" : "0.15"; });
+  [...ruler.children].forEach((t, i) => { t.style.opacity = i < left ? "1" : "0.12"; });
 }
 
-/* ----- Decision buttons ----- */
-
+/* ----- Decision buttons (two-step menus) ----- */
 
 // A key that only changes when the *situation* changes (not on every state
 // push), so keyboard focus isn't yanked away while someone is reading.
@@ -937,23 +924,33 @@ function promptSignature(s) {
   ].join("|");
 }
 
+// Local (per-client) menu navigation for the action picker.
+const menu = { action: null, target: null };
+function resetMenu() { menu.action = null; menu.target = null; }
+function renavigate(s) {
+  renderGame(s);
+  const first = $("decision-buttons").querySelector("button");
+  if (first) first.focus();
+}
+
 function renderDecisions(s, me) {
   const box = $("decision-buttons");
   box.innerHTML = "";
+  box.className = "grid gap-2";
   const head = $("decision-h");
 
-  if (!me) { head.textContent = "You are spectating"; return; }
+  if (!me) { head.textContent = "SPECTATING"; return; }
   if (!isAlive(me) && s.phase !== "over") {
-    head.textContent = "You are out of the game — watching";
+    head.textContent = "YOU'RE OUT — WATCHING";
     return;
   }
 
   let promptKey = null;
 
   if (s.phase === "over") {
-    head.textContent = "Game over";
+    head.textContent = "GAME OVER";
     if (session.isHost) {
-      box.appendChild(button("Back to lobby for a rematch", BTN_PRIMARY, async () => {
+      box.appendChild(button("Rematch — back to lobby", null, BTN_PRIMARY, async () => {
         await sb.from("games").update({ status: "lobby", state: {} }).eq("id", session.gameId);
         session.hostState = null;
       }));
@@ -962,66 +959,52 @@ function renderDecisions(s, me) {
   }
 
   if (s.phase === "action" && s.players[s.turnIdx].id === me.id) {
-    head.textContent = "Your turn — choose an action";
     promptKey = "action:" + promptSignature(s);
-    const mustCoup = me.coins >= 10;
-    for (const [key, spec] of Object.entries(ACTIONS)) {
-      if (mustCoup && key !== "coup") continue;
-      if (me.coins < spec.cost) continue;
-      if (!spec.targeted) {
-        box.appendChild(button(spec.label, key === "coup" ? BTN_DANGER : BTN_PRIMARY,
-          () => sendIntent({ type: "action", action: key })));
-      } else {
-        const targets = alivePlayers(s).filter((p) => p.id !== me.id && !(key === "steal" && p.coins === 0));
-        for (const t of targets) {
-          box.appendChild(button(`${spec.label} → ${t.name}`,
-            key === "coup" || key === "assassinate" ? BTN_DANGER : BTN_PRIMARY,
-            () => sendIntent({ type: "action", action: key, target: t.id })));
-        }
-      }
-    }
-    if (mustCoup) box.appendChild(el(`<p class="text-xl font-bold text-alert">You have 10 or more coins, so you must Coup.</p>`));
+    if (promptKey !== session.lastPromptKey) resetMenu();
+    renderActionMenu(s, me, box, head);
   }
 
   else if (s.phase === "reaction" || s.phase === "block_reaction") {
     const eligible = eligibleReactors(s);
     if (eligible.includes(me.id) && !s.pending.passes.includes(me.id)) {
-      head.textContent = "Respond now";
+      head.textContent = "RESPOND";
       promptKey = "react:" + promptSignature(s);
       const canCh = s.phase === "block_reaction" || s.pending.canChallenge;
       if (canCh) {
-        box.appendChild(button("⚡ Challenge — call the bluff", BTN_DANGER, () => sendIntent({ type: "challenge" })));
+        box.appendChild(button("⚡ Challenge", "call the bluff — loser gives up a card", BTN_DANGER,
+          () => sendIntent({ type: "challenge" })));
       }
       if (s.phase === "reaction" && canBlockNow(s, me.id)) {
         for (const role of ACTIONS[s.pending.action].blockRoles) {
-          box.appendChild(button(`${ROLE_SYMBOL[role]} Block — claim ${role}`, BTN_NEUTRAL,
+          box.appendChild(button(`${ROLE_SYMBOL[role]} Block as ${role}`, null, BTN_NEUTRAL,
             () => sendIntent({ type: "block", role })));
         }
       }
-      box.appendChild(button("Pass — do nothing", BTN_NEUTRAL, () => sendIntent({ type: "pass" })));
+      box.appendChild(button("Pass", "do nothing", BTN_NEUTRAL, () => sendIntent({ type: "pass" })));
     } else {
-      head.textContent = eligible.includes(me.id) ? "You passed — waiting for others" : "Waiting for other players";
+      head.textContent = eligible.includes(me.id) ? "PASSED — WAITING FOR OTHERS" : "WAITING…";
     }
   }
 
   else if (s.phase === "lose_card" && s.losingId === me.id) {
-    head.textContent = "Choose a card to lose (it turns face up)";
+    head.textContent = "GIVE UP A CARD";
     promptKey = "lose:" + promptSignature(s);
+    box.className = "grid grid-cols-2 gap-2";
     me.cards.forEach((c, i) => {
       if (c.revealed) return;
-      box.appendChild(button(`Give up ${ROLE_SYMBOL[c.role]} ${c.role}`, BTN_DANGER,
+      box.appendChild(button(`${ROLE_SYMBOL[c.role]} ${c.role}`, "turn face up", BTN_DANGER,
         () => sendIntent({ type: "lose", cardIndex: i })));
     });
   }
 
   else if (s.phase === "exchange" && s.exchange && s.exchange.playerId === me.id) {
-    head.textContent = "Exchange — pick the cards to keep";
+    head.textContent = "EXCHANGE — PICK CARDS TO KEEP";
     promptKey = "exchange:" + promptSignature(s);
     renderExchangePicker(s, me, box);
   }
 
   else {
-    head.textContent = "Waiting for other players";
+    head.textContent = "WAITING…";
   }
 
   // Move keyboard focus to the first new prompt meant for this player
@@ -1032,17 +1015,66 @@ function renderDecisions(s, me) {
   }
 }
 
+// Step 1: pick an action · Step 2: pick a target · Step 3 (coup): guess a card
+function renderActionMenu(s, me, box, head) {
+  const mustCoup = me.coins >= 10;
+
+  if (!menu.action) {
+    head.textContent = mustCoup ? "10+ COINS — YOU MUST COUP" : "CHOOSE AN ACTION";
+    box.className = "grid grid-cols-2 gap-2";
+    for (const [key, spec] of Object.entries(ACTIONS)) {
+      if (mustCoup && key !== "coup") continue;
+      if (me.coins < spec.cost) continue;
+      const cls = key === "coup" || key === "assassinate" ? BTN_DANGER : BTN_NEUTRAL;
+      const sub = spec.sub + (spec.targeted ? " ›" : "");
+      box.appendChild(button(spec.label, sub, cls, () => {
+        if (!spec.targeted) { sendIntent({ type: "action", action: key }); return; }
+        menu.action = key;
+        renavigate(s); // re-render into step 2
+      }));
+    }
+    return;
+  }
+
+  const spec = ACTIONS[menu.action];
+
+  if (!menu.target) {
+    head.textContent = `${spec.label.toUpperCase()} — PICK A TARGET`;
+    box.appendChild(button("‹ Back", null, BTN_BACK, () => { resetMenu(); renavigate(s); }));
+    const targets = alivePlayers(s).filter((p) => p.id !== me.id && !(menu.action === "steal" && p.coins === 0));
+    box.className = "grid gap-2";
+    for (const t of targets) {
+      const hidden = t.cards.filter((c) => !c.revealed).length;
+      box.appendChild(button(t.name, `${t.coins} coins · ${hidden} card${hidden === 1 ? "" : "s"}`, BTN_NEUTRAL, () => {
+        if (spec.guess) { menu.target = t.id; renavigate(s); return; }
+        sendIntent({ type: "action", action: menu.action, target: t.id });
+        resetMenu();
+      }));
+    }
+    return;
+  }
+
+  // Coup: guess one of the target's cards
+  head.textContent = `COUP ${nameOf(s, menu.target).toUpperCase()} — GUESS A CARD`;
+  box.appendChild(button("‹ Back", null, BTN_BACK, () => { menu.target = null; renavigate(s); }));
+  const grid = el(`<div class="grid grid-cols-2 gap-2"></div>`);
+  for (const role of ROLES) {
+    grid.appendChild(button(`${ROLE_SYMBOL[role]} ${role}`, "right: they lose it · wrong: coup fails", BTN_DANGER, () => {
+      sendIntent({ type: "action", action: "coup", target: menu.target, guess: role });
+      resetMenu();
+    }));
+  }
+  box.appendChild(grid);
+}
+
 function renderExchangePicker(s, me, box) {
   const hidden = me.cards.filter((c) => !c.revealed).map((c) => c.role);
   const pool = [...hidden, ...s.exchange.drawn];
   const keepCount = hidden.length;
   const picked = new Set();
 
-  const info = el(`<p class="text-xl">Select exactly <strong>${keepCount}</strong> card${keepCount === 1 ? "" : "s"} to keep. The rest go back to the deck.</p>`);
-  box.appendChild(info);
-
-  const grid = el(`<div class="grid grid-cols-1 sm:grid-cols-2 gap-3"></div>`);
-  const confirm = button(`Keep selected (0 of ${keepCount})`, BTN_PRIMARY, () => {
+  const grid = el(`<div class="grid grid-cols-2 gap-2"></div>`);
+  const confirm = button(`Keep selected (0/${keepCount})`, null, BTN_PRIMARY, () => {
     if (picked.size !== keepCount) return;
     sendIntent({ type: "exchange_keep", keep: [...picked] });
   });
@@ -1052,23 +1084,23 @@ function renderExchangePicker(s, me, box) {
   pool.forEach((role, i) => {
     const b = el(`
       <button type="button" aria-pressed="false"
-        class="min-h-[64px] text-2xl font-bold bg-panel text-mist border-4 border-mist rounded-xl px-4 py-3 text-left">
+        class="min-h-[48px] text-base font-bold bg-card text-mist border border-line rounded-lg px-3 py-2 text-left">
         <span aria-hidden="true">${ROLE_SYMBOL[role]}</span> ${role}
-        <span class="block text-lg font-normal">${i < keepCount ? "from your hand" : "newly drawn"}</span>
+        <span class="block text-xs font-normal text-dim">${i < keepCount ? "yours" : "drawn"}</span>
       </button>`);
     b.addEventListener("click", () => {
       if (picked.has(i)) {
         picked.delete(i);
         b.setAttribute("aria-pressed", "false");
-        b.className = b.className.replace("border-sun text-sun", "border-mist text-mist");
+        b.className = b.className.replace("border-sun text-sun", "border-line text-mist");
       } else {
         if (picked.size >= keepCount) return;
         picked.add(i);
         b.setAttribute("aria-pressed", "true");
-        b.className = b.className.replace("border-mist text-mist", "border-sun text-sun");
+        b.className = b.className.replace("border-line text-mist", "border-sun text-sun");
       }
       confirm.disabled = picked.size !== keepCount;
-      confirm.textContent = `Keep selected (${picked.size} of ${keepCount})`;
+      confirm.textContent = `Keep selected (${picked.size}/${keepCount})`;
     });
     grid.appendChild(b);
   });
@@ -1077,9 +1109,10 @@ function renderExchangePicker(s, me, box) {
   box.appendChild(confirm);
 }
 
-function button(label, cls, onClick) {
+function button(label, sub, cls, onClick) {
   const b = el(`<button type="button" class="${cls}"></button>`);
-  b.textContent = label;
+  b.appendChild(document.createTextNode(label));
+  if (sub) b.appendChild(el(`<span class="block text-xs font-normal opacity-75">${esc(sub)}</span>`));
   b.addEventListener("click", onClick);
   return b;
 }
@@ -1093,9 +1126,9 @@ function renderHand(s, me) {
   $("my-coins").textContent = me.coins;
   for (const c of me.cards) {
     ul.appendChild(el(`
-      <li class="border-4 ${c.revealed ? "border-line opacity-60" : "border-sun"} rounded-xl bg-panel px-4 py-5">
-        <p class="text-2xl font-bold"><span aria-hidden="true">${ROLE_SYMBOL[c.role]}</span> ${c.role}</p>
-        <p class="text-lg mt-1">${c.revealed ? "LOST — face up for everyone" : "Hidden — only you can see this"}</p>
+      <li class="flex-1 border ${c.revealed ? "border-line opacity-50" : "border-sun/70"} rounded-lg bg-card px-3 py-2.5">
+        <p class="text-base font-bold"><span aria-hidden="true">${ROLE_SYMBOL[c.role]}</span> ${c.role}</p>
+        <p class="text-xs text-dim mt-0.5">${c.revealed ? "lost — face up" : "hidden"}</p>
       </li>`));
   }
 }
@@ -1106,20 +1139,18 @@ function renderTable(s, turnP) {
   for (const p of s.players) {
     const alive = isAlive(p);
     const isTurn = p.id === turnP.id && s.phase !== "over";
-    const revealed = p.cards.filter((c) => c.revealed).map((c) => `${ROLE_SYMBOL[c.role]} ${c.role}`);
+    const lost = p.cards.filter((c) => c.revealed).map((c) => ROLE_SYMBOL[c.role] + " " + c.role);
     const hiddenCount = p.cards.filter((c) => !c.revealed).length;
     const isMe = p.id === session.playerId;
     ul.appendChild(el(`
-      <li class="border-4 ${isTurn ? "border-sun" : "border-line"} ${alive ? "" : "opacity-60"} rounded-xl bg-panel px-4 py-3">
-        <p class="text-2xl font-bold flex flex-wrap gap-x-3">
-          <span>${esc(p.name)}${isMe ? " (you)" : ""}</span>
-          ${isTurn ? `<span class="text-sun">◀ taking turn</span>` : ""}
-          ${alive ? "" : `<span class="text-alert">OUT</span>`}
+      <li class="border ${isTurn ? "border-sun" : "border-line"} ${alive ? "" : "opacity-45"} rounded-lg bg-panel px-3 py-2">
+        <p class="text-base font-bold flex items-center gap-1.5">
+          ${isTurn ? `<span class="text-sun" aria-label="taking turn">▶</span>` : ""}
+          <span class="truncate">${esc(p.name)}${isMe ? " (you)" : ""}</span>
+          ${alive ? "" : `<span class="text-alert text-xs font-bold ml-auto shrink-0">OUT</span>`}
         </p>
-        <p class="text-xl mt-1">
-          Coins: <strong>${p.coins}</strong> ·
-          Hidden cards: <strong>${hiddenCount}</strong>
-          ${revealed.length ? `· Lost: ${revealed.join(", ")}` : ""}
+        <p class="text-sm text-dim mt-0.5">
+          ${p.coins}c · ${hiddenCount}🂠${lost.length ? ` · <span class="text-alert">${lost.join(", ")}</span>` : ""}
         </p>
       </li>`));
   }
@@ -1129,9 +1160,11 @@ function renderTable(s, turnP) {
 
 function appendLog(message) {
   const ul = $("game-log");
-  ul.appendChild(el(`<li class="border-b-2 border-line/60 pb-2">${esc(message)}</li>`));
-  while (ul.childElementCount > 200) ul.removeChild(ul.firstChild);
+  ul.appendChild(el(`<li class="leading-snug">${esc(message)}</li>`));
+  while (ul.childElementCount > 150) ul.removeChild(ul.firstChild);
   ul.scrollTop = ul.scrollHeight;
+  const latest = $("log-latest");
+  if (latest) latest.textContent = "· " + (message.length > 48 ? message.slice(0, 47) + "…" : message);
 }
 
 /* ---------------- 8. Wiring ---------------- */

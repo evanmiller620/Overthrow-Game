@@ -1,6 +1,7 @@
 # Coup — Accessible Online Multiplayer
 
-A lightweight, low-vision-friendly web implementation of the card game **Coup** for 2–6 players.
+A lightweight, sleek web implementation of the card game **Coup** for 2–6 players, tuned for
+phones: dense single-screen layout, two-step action menus, and a collapsed game log.
 No build step, no server to run: static files on **GitHub Pages** + **Supabase** for realtime sync.
 
 ```
@@ -48,9 +49,10 @@ here port directly into a Vite + Tailwind CLI setup.
 
 1. **Create game** → a 4-character room code (lookalike letters like O/0 and I/1 are excluded).
 2. Friends **Join** with the code. The host presses **Start game** with 2–6 players.
-3. On your turn, pick an action. Role actions open a **15-second window** where other
-   players can **Challenge** or **Block** — it ends early as soon as everyone has passed,
-   otherwise the action resolves automatically when time runs out, and play moves on.
+3. On your turn, pick an action from the grid; targeted actions open a second screen to
+   pick the target (and Coup a third to guess a card). Role actions open a **15-second
+   window** where other players can **Challenge** or **Block** — it ends early as soon as
+   everyone has passed, otherwise the action resolves automatically when time runs out.
 4. Choosing a card to lose, and Ambassador exchanges, have a 30-second window with a
    sensible automatic fallback so one absent player can never freeze the game.
 5. Last player with a hidden card wins. The host gets a one-click **rematch** button.
@@ -80,28 +82,34 @@ cryptography — exactly the trade-off of the "semi-trusted" choice. The schema 
 intent protocol were designed so you can later move the engine into Postgres functions
 (RPC) for true RLS-enforced secrecy without changing the tables or the client flow.
 
+### House rule: guess-the-card Coup
+
+Coup costs 7 coins and the attacker **names one of the target's cards**. If the target
+secretly holds that role, that exact card is revealed and lost (the target doesn't choose).
+If the guess is wrong, the coup fails — and the 7 coins are spent either way. Mandatory
+Coup at 10+ coins still applies. This replaces the standard "target picks a card to lose"
+rule; Assassinations still let the target choose.
+
 Known limitations (kept deliberately simple):
 - No host migration — if the host closes the tab mid-game, the game stalls.
 - The lobby list shows who has *joined*, not who is currently connected.
 - Action costs (Assassinate's 3 coins, Coup's 7) are paid on declaration and are not
   refunded, even if the action is blocked or successfully challenged.
 
-## Accessibility (WCAG AAA targets)
+## Design & accessibility
 
-- **Contrast:** charcoal `#121214` background with `#F5F5F2` text (≈17:1) and `#FFD60A`
-  accents (≈12.6:1); the danger/success tints also clear the 7:1 AAA threshold.
-- **Never color-only:** turn state, eliminations, blocks, and the countdown are always
-  expressed in words and symbols ("◀ taking turn", "OUT", a numeral beside the timer
-  ruler), not just color.
-- **Type:** Atkinson Hyperlegible (designed by the Braille Institute), root size 18px,
-  all interactive text 24px+, thick 4px borders, 64px+ touch targets.
-- **Keyboard & screen readers:** semantic `<main>/<section>/<button>` structure, a skip
-  link, a native `<dialog>` card guide (focus-trapped, Esc closes), `role="status"` turn
-  banner and an `aria-live` game log, and a visible 4px focus outline everywhere. When a
-  decision is required of *you*, focus moves to your first option — and only then, so
-  focus is never stolen while you're reading.
-- **Zoom & responsive:** a single fluid column that holds together on mobile and at
-  200% browser zoom; `prefers-reduced-motion` disables the countdown animation.
+The layout is built phone-first for minimal scrolling: a compact banner with the inline
+countdown, your decision buttons immediately below it, your hand and coins on one row, a
+two-column player grid, and the game log collapsed into a one-line summary you can expand.
+Action menus are two-step (action → target → guess for Coup) so no screen ever shows more
+than a handful of choices.
+
+Accessibility is kept where it's cheap: high-contrast charcoal/yellow palette, Atkinson
+Hyperlegible at a 16px base, 48px touch targets, words-and-symbols alongside color
+("▶" turn marker, "OUT" badges, a numeral beside the timer), semantic landmarks, a skip
+link, a native `<dialog>` card guide, `role="status"` banner + `aria-live` log, visible
+focus outlines, focus moved to your options only when a decision becomes yours, and
+`prefers-reduced-motion` support.
 
 ## Testing the rules engine
 
@@ -114,4 +122,5 @@ node test-engine.js
 It covers turn rotation, all-pass and timeout resolution, proven and bluffed challenges,
 blocks, challenge-the-block, the double-loss assassination case, post-challenge block
 windows, exchanges with deck conservation, mandatory Coup at 10+ coins, win detection,
-and rejection of illegal intents.
+and rejection of illegal intents — plus the guess-the-card Coup (right guess, wrong
+guess, missing/bogus guess).
