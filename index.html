@@ -53,6 +53,17 @@
       overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
     }
 
+    /* big-moment overlay */
+    @keyframes fxpop {
+      0%   { transform: scale(0.6) rotate(-2deg); opacity: 0; }
+      12%  { transform: scale(1.07) rotate(0.5deg); opacity: 1; }
+      20%  { transform: scale(1); }
+      82%  { transform: scale(1); opacity: 1; }
+      100% { transform: scale(0.97); opacity: 0; }
+    }
+    .fx-pop { animation: fxpop 1.9s ease forwards; }
+    @media (prefers-reduced-motion: reduce) { .fx-pop { animation: none; } }
+
     /* subtle lift for tappable things */
     button { transition: transform 80ms ease, filter 120ms ease; }
     button:active { transform: scale(0.97); }
@@ -68,10 +79,19 @@
   <header class="border-b border-line">
     <div class="max-w-xl mx-auto px-4 py-2.5 flex items-center justify-between gap-3">
       <h1 class="text-lg font-bold tracking-[0.25em] text-sun">◆ COUP</h1>
-      <button id="btn-guide" type="button"
-        class="min-h-[40px] px-3.5 text-base font-bold bg-panel border-2 border-line rounded-lg hover:border-mist">
-        ? Cards
-      </button>
+      <div class="flex items-center gap-2">
+        <button id="header-code" type="button" hidden
+          class="min-h-[40px] px-3 text-base font-bold tracking-[0.2em] text-sun bg-panel border-2 border-sun/60 rounded-lg select-all"
+          title="Room code — tap to copy" aria-label="Room code, tap to copy"></button>
+        <button id="btn-howto" type="button"
+          class="min-h-[40px] px-3 text-base font-bold bg-panel border-2 border-line rounded-lg hover:border-mist">
+          ? Rules
+        </button>
+        <button id="btn-guide" type="button"
+          class="min-h-[40px] px-3 text-base font-bold bg-panel border-2 border-line rounded-lg hover:border-mist">
+          Cards
+        </button>
+      </div>
     </div>
   </header>
 
@@ -127,6 +147,8 @@
       <h3 class="text-sm font-bold text-dim mb-2">PLAYERS · <span id="lobby-count">0</span>/6</h3>
       <ul id="lobby-players" class="grid grid-cols-2 gap-2 mb-5 text-base"></ul>
 
+      <div id="lobby-settings" class="mb-5"></div>
+
       <div id="lobby-host-controls" hidden>
         <button id="btn-start" type="button"
           class="min-h-[52px] w-full text-lg font-bold bg-sun text-ink rounded-xl px-5 py-3 disabled:opacity-40 disabled:cursor-not-allowed hover:brightness-110">
@@ -167,7 +189,7 @@
       <!-- Table overview -->
       <section aria-labelledby="table-h" class="mb-4">
         <h3 id="table-h" class="text-sm font-bold text-dim mb-2">PLAYERS</h3>
-        <ul id="table-players" class="grid grid-cols-2 gap-2"></ul>
+        <ul id="table-players" class="grid grid-cols-2 sm:grid-cols-3 gap-1.5"></ul>
       </section>
 
       <!-- Game log: collapsed by default -->
@@ -180,6 +202,38 @@
       </details>
     </section>
   </main>
+
+  <!-- Big-moment overlay (decorative; the log announces events to screen readers) -->
+  <div id="fx-overlay" hidden aria-hidden="true"
+    class="fixed inset-0 z-40 flex items-center justify-center pointer-events-none px-6">
+    <div id="fx-card"
+      class="bg-panel border-2 border-sun rounded-2xl px-6 py-4 text-xl font-bold text-center shadow-[0_0_60px_rgba(255,214,10,0.25)]">
+    </div>
+  </div>
+
+  <!-- ============ How to play ============ -->
+  <dialog id="howto-dialog" class="bg-ink text-mist border-2 border-sun rounded-2xl p-0 w-[min(34rem,94vw)]"
+    aria-labelledby="howto-h">
+    <div class="p-5">
+      <div class="flex items-start justify-between gap-3 mb-3">
+        <h2 id="howto-h" class="text-xl font-bold">How to play</h2>
+        <button id="btn-howto-close" type="button"
+          class="min-h-[40px] px-3.5 text-base font-bold bg-panel border-2 border-line rounded-lg hover:border-mist">
+          Close
+        </button>
+      </div>
+      <ol class="text-sm grid gap-2.5 list-decimal pl-5">
+        <li><strong>Goal:</strong> be the last player with a hidden card. You start with 2 secret cards and some coins.</li>
+        <li><strong>On your turn</strong>, take one action. Safe ones (Income) just happen. Role actions (Tax, Steal, Assassinate, Exchange) claim a card — <em>you don't have to actually hold it.</em></li>
+        <li><strong>Bluff & punish:</strong> when someone claims a role, anyone may <strong class="text-alert">Challenge</strong> during the timer. Caught bluffing → lose a card. Wrongly accused → the challenger loses one instead.</li>
+        <li><strong>Blocks:</strong> some actions can be blocked by claiming the right role (see the Cards page). Blocks can be challenged too.</li>
+        <li><strong>Coup</strong> (7 coins) can't be blocked or challenged. With the guess rule on, name one of the target's cards: right → they lose it, wrong → the coup fails. At 10+ coins you <em>must</em> coup.</li>
+        <li><strong>Timers:</strong> if nobody reacts before the bar runs out, the action simply happens and play moves on.</li>
+        <li>Lose both cards and you're out — but you see everything. Last one standing wins. 🏆</li>
+      </ol>
+      <p class="text-sm text-dim mt-3">Tip: the room code stays in the top bar — friends who drop can rejoin with it.</p>
+    </div>
+  </dialog>
 
   <!-- ============ Card guide ============ -->
   <dialog id="guide-dialog" class="bg-ink text-mist border-2 border-sun rounded-2xl p-0 w-[min(36rem,94vw)]"
@@ -235,7 +289,7 @@
       <ul class="text-sm grid gap-1.5">
         <li><strong>Income:</strong> take 1 coin. Safe — no blocks, no challenges.</li>
         <li><strong>Foreign aid:</strong> take 2 coins. Anyone may block as Duke.</li>
-        <li><strong>Coup:</strong> pay 7 and <strong>guess one of the target's cards</strong>. Right guess → they lose that card. Wrong guess → the coup fails (coins still spent). Can't be blocked. Required at 10+ coins.</li>
+        <li><strong>Coup:</strong> pay 7. With the host's <em>guess rule</em> on, name one of the target's cards — right: they lose it, wrong: the coup fails (coins spent either way). Classic rule: the target picks a card to lose. Never blockable. Required at 10+ coins.</li>
       </ul>
       <p class="text-sm mt-3 text-dim">Any role claim can be <strong class="text-mist">challenged</strong>. Prove it and the challenger loses a card; bluff and you lose one.</p>
     </div>

@@ -219,5 +219,42 @@ check("actor cannot pass own window", G.doPass(s, "p0") === false);
 check("double pass rejected", (G.doPass(s, "p1"), G.doPass(s, "p1")) === false);
 check("non-target cannot block steal-style", G.doBlock(s, "p2", "Contessa") === false);
 
+// ---------- T12: lobby settings ----------
+console.log("T12 settings: classic coup, starting coins, turn timer");
+s = newGame(3);
+s.settings.coupGuess = false;
+A(s).coins = 7;
+B(s).cards = [{ role: "Duke", revealed: false }, { role: "Captain", revealed: false }];
+check("classic coup needs no guess", G.doAction(s, "p0", "coup", "p1") === true);
+check("target chooses which card to lose", s.phase === "lose_card" && s.losingId === "p1");
+G.doLose(s, "p1", 1);
+check("chosen card revealed", B(s).cards[1].revealed === true);
+check("turn advanced", s.players[s.turnIdx].id === "p1");
+
+const s2 = G.freshState(roster(2), { startCoins: 3 });
+check("custom starting coins applied", s2.players.every(p => p.coins === 3));
+const s3 = G.freshState(roster(2), { turnSecs: 30 });
+check("turn timer armed at game start", typeof s3.deadlineAt === "number" && s3.deadlineAt > Date.now());
+const s4 = G.freshState(roster(2));
+check("no turn timer by default", s4.deadlineAt === null);
+
+// ---------- T13: turn-timer timeout autoplays ----------
+console.log("T13 action timeout → auto Income (or forced Coup at 10+)");
+s = newGame(2);
+s.settings.turnSecs = 30;
+s.deadlineAt = Date.now() - 1;
+session.hostState = s;
+G.hostHandleTimeout();
+check("timed-out player auto-takes Income", A(s).coins === 3);
+check("turn moved on with a fresh deadline", s.players[s.turnIdx].id === "p1" && s.deadlineAt > Date.now());
+
+s = newGame(2);
+s.settings.turnSecs = 30;
+A(s).coins = 10;
+s.deadlineAt = Date.now() - 1;
+session.hostState = s;
+G.hostHandleTimeout();
+check("at 10+ coins the timeout forces a Coup (7 paid)", A(s).coins === 3);
+
 console.log(failures === 0 ? "\nALL TESTS PASSED" : `\n${failures} FAILURES`);
 process.exit(failures ? 1 : 0);

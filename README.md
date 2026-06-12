@@ -48,17 +48,25 @@ here port directly into a Vite + Tailwind CLI setup.
 ## How a game flows
 
 1. **Create game** → a 4-character room code (lookalike letters like O/0 and I/1 are excluded).
-2. Friends **Join** with the code. The host presses **Start game** with 2–6 players.
+2. Friends **Join** with the code. In the lobby the host can tune the game: reaction
+   time (10–30s), decision time (15–60s), an optional per-turn timer (off/30/60/90s —
+   a timed-out player auto-takes Income, or a forced Coup at 10+ coins), starting coins
+   (1–3), and the Coup style (guess-a-card vs classic target-chooses). Settings survive
+   rematches. The host presses **Start game** with 2–6 players.
 3. On your turn, pick an action from the grid; targeted actions open a second screen to
-   pick the target (and Coup a third to guess a card). Role actions open a **15-second
-   window** where other players can **Challenge** or **Block** — it ends early as soon as
-   everyone has passed, otherwise the action resolves automatically when time runs out.
+   pick the target (and Coup a third to guess a card, when that rule is on). Role actions
+   open a reaction window where other players can **Challenge** or **Block** — it ends
+   early as soon as everyone has passed, otherwise the action resolves on timeout. The
+   Challenge/Block buttons stay disabled for ~1 second after the window opens so a tap
+   aimed at the previous screen can't fire one by accident.
 4. Choosing a card to lose, and Ambassador exchanges, have a 30-second window with a
    sensible automatic fallback so one absent player can never freeze the game.
 5. Last player with a hidden card wins. The host gets a one-click **rematch** button.
 
-Refreshing the page? Re-enter the same room code from the same browser and you resume
-your seat (identity is kept in `localStorage` per room).
+The room code stays pinned in the top bar during play (tap it to copy), so anyone who
+drops can rejoin: re-enter the same code from the same browser and you resume your seat
+(identity is kept in `localStorage` per room). A "? Rules" how-to-play dialog is always
+one tap away, alongside the card reference.
 
 ## Architecture: who is in charge?
 
@@ -82,13 +90,17 @@ cryptography — exactly the trade-off of the "semi-trusted" choice. The schema 
 intent protocol were designed so you can later move the engine into Postgres functions
 (RPC) for true RLS-enforced secrecy without changing the tables or the client flow.
 
-### House rule: guess-the-card Coup
+### House rule: guess-the-card Coup (toggleable)
 
-Coup costs 7 coins and the attacker **names one of the target's cards**. If the target
-secretly holds that role, that exact card is revealed and lost (the target doesn't choose).
-If the guess is wrong, the coup fails — and the 7 coins are spent either way. Mandatory
-Coup at 10+ coins still applies. This replaces the standard "target picks a card to lose"
-rule; Assassinations still let the target choose.
+With the default **Guess a card** style, Coup costs 7 coins and the attacker names one of
+the target's cards: right → that exact card is revealed and lost (the target doesn't
+choose); wrong → the coup fails, coins spent either way. The host can switch to
+**Classic** in the lobby, where the target picks which card to lose. Mandatory Coup at
+10+ coins applies in both. Assassinations always let the target choose.
+
+Big moments — coups landing or missing, bluffs called, proofs shown, eliminations, and
+the win — pop a brief animated overlay on every screen (skipped under
+`prefers-reduced-motion`; the log carries the same info for screen readers).
 
 Known limitations (kept deliberately simple):
 - No host migration — if the host closes the tab mid-game, the game stalls.
@@ -122,5 +134,5 @@ node test-engine.js
 It covers turn rotation, all-pass and timeout resolution, proven and bluffed challenges,
 blocks, challenge-the-block, the double-loss assassination case, post-challenge block
 windows, exchanges with deck conservation, mandatory Coup at 10+ coins, win detection,
-and rejection of illegal intents — plus the guess-the-card Coup (right guess, wrong
-guess, missing/bogus guess).
+and rejection of illegal intents — plus both Coup styles, custom starting coins,
+turn-timer arming, and timeout autoplay.

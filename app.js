@@ -20,8 +20,31 @@
 const ROLES = ["Duke", "Assassin", "Captain", "Ambassador", "Contessa"];
 const ROLE_SYMBOL = { Duke: "◆", Assassin: "✦", Captain: "▲", Ambassador: "⬟", Contessa: "●" };
 
-const REACTION_SECONDS = 15; // challenge / block window
-const DECIDE_SECONDS   = 30; // pick a card to lose / exchange picks
+// Host-customizable settings (chosen in the lobby) with their defaults.
+const DEFAULT_SETTINGS = {
+  reactionSecs: 15,  // challenge / block window
+  decideSecs:   30,  // pick a card to lose / exchange picks
+  turnSecs:     0,   // time per turn; 0 = unlimited
+  startCoins:   2,
+  coupGuess:    true, // true: attacker guesses a card · false: classic (target chooses)
+};
+const SETTING_OPTIONS = {
+  reactionSecs: { label: "Reaction time",  unit: "s", values: [10, 15, 20, 30] },
+  decideSecs:   { label: "Decision time",  unit: "s", values: [15, 30, 45, 60] },
+  turnSecs:     { label: "Turn timer",     unit: "s", values: [0, 30, 60, 90] },
+  startCoins:   { label: "Starting coins", unit: "",  values: [1, 2, 3] },
+  coupGuess:    { label: "Coup style",     unit: "",  values: [true, false],
+                  names: { true: "Guess a card", false: "Classic" } },
+};
+function getSettings(s) { return { ...DEFAULT_SETTINGS, ...((s && s.settings) || {}) }; }
+
+const ARM_DELAY_MS = 1200; // reaction buttons stay disabled briefly to prevent misclicks
+
+// Big-moment overlay events, written by the host into the state
+function fx(s, text) {
+  s.fxSeq = (s.fxSeq || 0) + 1;
+  s.fx = { key: s.fxSeq, text };
+}
 
 // Room codes avoid lookalike glyphs (no 0/O, 1/I/L, 5/S, 8/B...kept B for brevity? no — drop them all)
 const CODE_ALPHABET = "ACDEFGHJKMNPQRTUVWXYZ234679";
@@ -262,6 +285,14 @@ async function enterRoom(game, playerId, name) {
     hostArmTimer();
   }
 
+  // Show the room code in the header so anyone can read it out / rejoin
+  const chip = $("header-code");
+  chip.textContent = game.code;
+  chip.hidden = false;
+
+  // Don't replay a big-moment overlay from before we joined
+  if (game.state && game.state.fx) lastFxKey = game.state.fx.key;
+
   renderAll();
 }
 
@@ -299,13 +330,14 @@ function shuffle(arr) {
   return arr;
 }
 
-function freshState(rosterRows) {
+function freshState(rosterRows, settings) {
+  const st = { ...DEFAULT_SETTINGS, ...(settings || {}) };
   const deck = shuffle(ROLES.flatMap((r) => [r, r, r])); // 15 cards
   const order = shuffle([...rosterRows]);
   const players = order.map((row) => ({
     id: row.id,
     name: row.name,
-    coins: 2,
+    coins: st.startCoins,
     cards: [
       { role: deck.pop(), revealed: false },
       { role: deck.pop(), revealed: false },
@@ -321,9 +353,12 @@ function freshState(rosterRows) {
     losingId: null,
     continuation: null,
     exchange: null,
-    deadlineAt: null,
+    deadlineAt: st.turnSecs > 0 ? Date.now() + st.turnSecs * 1000 : null,
     winnerId: null,
     gen: 0,
+    settings: st,
+    fxSeq: 0,
+    fx: null,
   };
 }
 
@@ -367,6 +402,20 @@ function hostArmTimer() {
 function hostHandleTimeout() {
   const s = session.hostState;
   switch (s.phase) {
+    case "action": {
+      const p = currentPlayer(s);
+      if (p.coins >= 10) {
+        const targets = alivePlayers(s).filter((x) => x.id !== p.id);
+        const t = targets[Math.floor(Math.random() * targets.length)];
+        const guess = ROLES[Math.floor(Math.random() * ROLES.length)];
+        hostLog(`${p.name} ran out of time — forced Coup.`);
+        doAction(s, p.id, "coup", t.id, guess);
+      } else {
+        hostLog(`${p.name} ran out of time — Income.`);
+        doAction(s, p.id, "income");
+      }
+      break;
+    }
     case "reaction":
       resolveAction(s);
       break;
@@ -399,7 +448,8 @@ function hostHandleIntent(intent) {
     if (from !== session.playerId) return;            // only the host starts
     if (session.game.status !== "lobby") return;
     if (session.roster.length < 2 || session.roster.length > 6) return;
-    session.hostState = freshState(session.roster);
+    const lobbySettings = (session.game.state && session.game.state.settings) || {};
+    session.hostState = freshState(session.roster, lobbySettings);
     const s = session.hostState;
     hostLog(`Game on — turn order: ${s.players.map((p) => p.name).join(" → ")}.`);
     hostPush();
@@ -434,7 +484,8 @@ function doAction(s, pid, action, targetId, guess) {
 
   if (actor.coins >= 10 && action !== "coup") return false;     // mandatory coup
   if (actor.coins < spec.cost) return false;
-  if (spec.guess && !ROLES.includes(guess)) return false;
+  const guessMode = action === "coup" && getSettings(s).coupGuess;
+  if (guessMode && !ROLES.includes(guess)) return false;
 
   let target = null;
   if (spec.targeted) {
@@ -453,16 +504,24 @@ function doAction(s, pid, action, targetId, guess) {
   }
 
   if (action === "coup") {
-    // House rule: the attacker names a card. Right → that card is lost.
-    // Wrong → the coup fails (the 7 coins are spent either way).
-    const idx = target.cards.findIndex((c) => !c.revealed && c.role === guess);
-    if (idx >= 0) {
-      hostLog(`${actor.name} coups ${target.name}, guessing ${guess} — correct!`);
-      revealCard(s, target, idx);
+    if (guessMode) {
+      // House rule: the attacker names a card. Right → that card is lost.
+      // Wrong → the coup fails (the 7 coins are spent either way).
+      const idx = target.cards.findIndex((c) => !c.revealed && c.role === guess);
+      if (idx >= 0) {
+        hostLog(`${actor.name} coups ${target.name}, guessing ${guess} — correct!`);
+        fx(s, `💥 COUP HITS! ${target.name} had ${guess}`);
+        revealCard(s, target, idx);
+      } else {
+        hostLog(`${actor.name} coups ${target.name}, guessing ${guess} — wrong. The coup fails.`);
+        fx(s, `💨 Coup misses — no ${guess} there`);
+      }
+      endTurn(s);
     } else {
-      hostLog(`${actor.name} coups ${target.name}, guessing ${guess} — wrong. The coup fails.`);
+      hostLog(`${actor.name} coups ${target.name}.`);
+      fx(s, `💥 COUP on ${target.name}!`);
+      enqueueLoss(s, target.id, "end");
     }
-    endTurn(s);
     return true;
   }
 
@@ -476,7 +535,7 @@ function doAction(s, pid, action, targetId, guess) {
     passes: [],
   };
   s.phase = "reaction";
-  s.deadlineAt = Date.now() + REACTION_SECONDS * 1000;
+  s.deadlineAt = Date.now() + getSettings(s).reactionSecs * 1000;
 
   hostLog(`${actor.name}: ${actionPhrase(action, target ? target.name : "")}.`);
   return true;
@@ -536,7 +595,7 @@ function doBlock(s, pid, role) {
   s.pending.block = { by: pid, role };
   s.phase = "block_reaction";
   s.pending.passes = [];
-  s.deadlineAt = Date.now() + REACTION_SECONDS * 1000;
+  s.deadlineAt = Date.now() + getSettings(s).reactionSecs * 1000;
   hostLog(`${blocker.name} blocks with ${role}.`);
   return true;
 }
@@ -567,6 +626,7 @@ function doChallenge(s, pid) {
   if (idx >= 0) {
     // Proof: show the card, shuffle it back, draw a replacement, challenger loses a card
     hostLog(`${accused.name} shows ${claimedRole} — challenge fails. Card replaced.`);
+    fx(s, `🛡 ${accused.name} really had ${claimedRole}!`);
     s.deck.push(claimedRole);
     shuffle(s.deck);
     accused.cards[idx] = { role: s.deck.pop(), revealed: false };
@@ -574,6 +634,7 @@ function doChallenge(s, pid) {
     enqueueLoss(s, challenger.id, null /* continuation already set */);
   } else {
     hostLog(`${accused.name} was bluffing!`);
+    fx(s, `🎭 BLUFF CALLED — ${accused.name} faked ${claimedRole}`);
     s.continuation = bluffCont;
     enqueueLoss(s, accused.id, null);
   }
@@ -610,7 +671,7 @@ function processLossQueue(s) {
     // Player must choose which card to give up
     s.phase = "lose_card";
     s.losingId = pid;
-    s.deadlineAt = Date.now() + DECIDE_SECONDS * 1000;
+    s.deadlineAt = Date.now() + getSettings(s).decideSecs * 1000;
     return false;
   }
   runContinuation(s);
@@ -637,7 +698,10 @@ function continueAfterReveal(s) {
 function revealCard(s, p, idx) {
   p.cards[idx].revealed = true;
   hostLog(`${p.name} loses ${p.cards[idx].role}.`);
-  if (!isAlive(p)) hostLog(`${p.name} is out.`);
+  if (!isAlive(p)) {
+    hostLog(`${p.name} is out.`);
+    fx(s, `☠ ${p.name} is OUT`);
+  }
 }
 
 function runContinuation(s) {
@@ -656,7 +720,7 @@ function runContinuation(s) {
         s.phase = "reaction";
         s.pending.canChallenge = false;
         s.pending.passes = [];
-        s.deadlineAt = Date.now() + REACTION_SECONDS * 1000;
+        s.deadlineAt = Date.now() + getSettings(s).reactionSecs * 1000;
       } else {
         resolveAction(s);
       }
@@ -719,7 +783,7 @@ function resolveAction(s) {
       const drawn = [s.deck.pop(), s.deck.pop()];
       s.exchange = { playerId: actorId, drawn };
       s.phase = "exchange";
-      s.deadlineAt = Date.now() + DECIDE_SECONDS * 1000;
+      s.deadlineAt = Date.now() + getSettings(s).decideSecs * 1000;
       break;
     }
     default:
@@ -774,6 +838,7 @@ function endTurn(s) {
     s.phase = "over";
     s.winnerId = alive[0].id;
     hostLog(`🏆 ${alive[0].name} wins!`);
+    fx(s, `🏆 ${alive[0].name.toUpperCase()} WINS`);
     return;
   }
 
@@ -781,6 +846,8 @@ function endTurn(s) {
   do { i = (i + 1) % s.players.length; } while (!isAlive(s.players[i]));
   s.turnIdx = i;
   s.phase = "action";
+  const st = getSettings(s);
+  if (st.turnSecs > 0) s.deadlineAt = Date.now() + st.turnSecs * 1000;
 }
 
 /* ============================================================
@@ -793,7 +860,26 @@ function renderAll() {
 
   const g = session.game;
   if (g.status === "lobby") { renderLobby(); return; }
+  maybeFx(g.state);
   renderGame(g.state);
+}
+
+/* ----- Big-moment overlay ----- */
+
+let lastFxKey = 0;
+let fxTimer = null;
+function maybeFx(s) {
+  if (!s || !s.fx || s.fx.key === lastFxKey) return;
+  lastFxKey = s.fx.key;
+  const overlay = $("fx-overlay");
+  const card = $("fx-card");
+  card.textContent = s.fx.text;
+  overlay.hidden = false;
+  card.classList.remove("fx-pop");
+  void card.offsetWidth; // restart the animation
+  card.classList.add("fx-pop");
+  clearTimeout(fxTimer);
+  fxTimer = setTimeout(() => { overlay.hidden = true; }, 1900);
 }
 
 /* ----- Lobby ----- */
@@ -815,12 +901,50 @@ function renderLobby() {
       </li>`));
   }
 
+  renderLobbySettings();
+
   $("lobby-host-controls").hidden = !session.isHost;
   $("lobby-wait-msg").hidden = session.isHost;
   if (session.isHost) {
     const ok = session.roster.length >= 2 && session.roster.length <= 6;
     $("btn-start").disabled = !ok;
   }
+}
+
+function renderLobbySettings() {
+  const box = $("lobby-settings");
+  box.innerHTML = "";
+  const st = getSettings(session.game.state);
+  box.appendChild(el(`<h3 class="text-sm font-bold text-dim mb-2">GAME SETTINGS${session.isHost ? "" : " <span class=\"font-normal\">(host picks)</span>"}</h3>`));
+
+  for (const [key, opt] of Object.entries(SETTING_OPTIONS)) {
+    const row = el(`<div class="flex items-center gap-2 mb-1.5"></div>`);
+    row.appendChild(el(`<span class="text-sm text-dim w-28 shrink-0">${opt.label}</span>`));
+    const valName = (v) => opt.names ? opt.names[v] : (v === 0 ? "Off" : v + opt.unit);
+
+    if (!session.isHost) {
+      row.appendChild(el(`<span class="text-sm font-bold">${valName(st[key])}</span>`));
+    } else {
+      const group = el(`<div class="flex flex-wrap gap-1.5" role="group" aria-label="${opt.label}"></div>`);
+      for (const v of opt.values) {
+        const active = st[key] === v;
+        const b = el(`<button type="button" aria-pressed="${active}"
+          class="min-h-[34px] px-2.5 text-sm font-bold rounded-md border ${active ? "bg-sun text-ink border-sun" : "bg-card text-dim border-line hover:text-mist hover:border-mist"}">${valName(v)}</button>`);
+        b.addEventListener("click", () => updateLobbySetting(key, v));
+        group.appendChild(b);
+      }
+      row.appendChild(group);
+    }
+    box.appendChild(row);
+  }
+}
+
+async function updateLobbySetting(key, value) {
+  const cur = session.game.state || {};
+  const settings = { ...getSettings(cur), [key]: value };
+  await sb.from("games")
+    .update({ state: { ...cur, settings } })
+    .eq("id", session.gameId);
 }
 
 /* ----- Game ----- */
@@ -896,7 +1020,11 @@ let countdownInterval = setInterval(tickCountdown, 250);
 function tickCountdown() {
   const s = session.game && session.game.state;
   if (!s || !s.deadlineAt || $("countdown-wrap").hidden) return;
-  const total = (s.phase === "lose_card" || s.phase === "exchange") ? DECIDE_SECONDS : REACTION_SECONDS;
+  const st = getSettings(s);
+  const total = s.phase === "action" ? st.turnSecs
+    : (s.phase === "lose_card" || s.phase === "exchange") ? st.decideSecs
+    : st.reactionSecs;
+  if (!total) return;
   const left = Math.max(0, Math.ceil((s.deadlineAt - Date.now()) / 1000));
   $("countdown-num").textContent = left;
 
@@ -951,7 +1079,8 @@ function renderDecisions(s, me) {
     head.textContent = "GAME OVER";
     if (session.isHost) {
       box.appendChild(button("Rematch — back to lobby", null, BTN_PRIMARY, async () => {
-        await sb.from("games").update({ status: "lobby", state: {} }).eq("id", session.gameId);
+        const settings = getSettings(s);
+        await sb.from("games").update({ status: "lobby", state: { settings } }).eq("id", session.gameId);
         session.hostState = null;
       }));
     }
@@ -970,17 +1099,30 @@ function renderDecisions(s, me) {
       head.textContent = "RESPOND";
       promptKey = "react:" + promptSignature(s);
       const canCh = s.phase === "block_reaction" || s.pending.canChallenge;
+      const armed = [];
       if (canCh) {
-        box.appendChild(button("⚡ Challenge", "call the bluff — loser gives up a card", BTN_DANGER,
-          () => sendIntent({ type: "challenge" })));
+        armed.push(box.appendChild(button("⚡ Challenge", "call the bluff — loser gives up a card", BTN_DANGER,
+          () => sendIntent({ type: "challenge" }))));
       }
       if (s.phase === "reaction" && canBlockNow(s, me.id)) {
         for (const role of ACTIONS[s.pending.action].blockRoles) {
-          box.appendChild(button(`${ROLE_SYMBOL[role]} Block as ${role}`, null, BTN_NEUTRAL,
-            () => sendIntent({ type: "block", role })));
+          armed.push(box.appendChild(button(`${ROLE_SYMBOL[role]} Block as ${role}`, null, BTN_NEUTRAL,
+            () => sendIntent({ type: "block", role }))));
         }
       }
       box.appendChild(button("Pass", "do nothing", BTN_NEUTRAL, () => sendIntent({ type: "pass" })));
+      // Disable the committing buttons for a beat after the window opens, so a
+      // tap aimed at the previous screen can't land on Challenge by accident.
+      const openedAt = s.deadlineAt - getSettings(s).reactionSecs * 1000;
+      const armIn = openedAt + ARM_DELAY_MS - Date.now();
+      if (armIn > 0 && armed.length) {
+        armed.forEach((b) => { b.disabled = true; b.classList.add("opacity-40"); });
+        setTimeout(() => {
+          armed.forEach((b) => {
+            if (b.isConnected) { b.disabled = false; b.classList.remove("opacity-40"); }
+          });
+        }, armIn);
+      }
     } else {
       head.textContent = eligible.includes(me.id) ? "PASSED — WAITING FOR OTHERS" : "WAITING…";
     }
@@ -1022,11 +1164,12 @@ function renderActionMenu(s, me, box, head) {
   if (!menu.action) {
     head.textContent = mustCoup ? "10+ COINS — YOU MUST COUP" : "CHOOSE AN ACTION";
     box.className = "grid grid-cols-2 gap-2";
+    const coupGuess = getSettings(s).coupGuess;
     for (const [key, spec] of Object.entries(ACTIONS)) {
       if (mustCoup && key !== "coup") continue;
       if (me.coins < spec.cost) continue;
-      const cls = key === "coup" || key === "assassinate" ? BTN_DANGER : BTN_NEUTRAL;
-      const sub = spec.sub + (spec.targeted ? " ›" : "");
+      const cls = (key === "coup" || key === "assassinate" ? BTN_DANGER : BTN_NEUTRAL) + " !min-h-[60px] !text-lg";
+      const sub = (key === "coup" && !coupGuess ? "pay 7 · they lose a card" : spec.sub) + (spec.targeted ? " ›" : "");
       box.appendChild(button(spec.label, sub, cls, () => {
         if (!spec.targeted) { sendIntent({ type: "action", action: key }); return; }
         menu.action = key;
@@ -1045,8 +1188,8 @@ function renderActionMenu(s, me, box, head) {
     box.className = "grid gap-2";
     for (const t of targets) {
       const hidden = t.cards.filter((c) => !c.revealed).length;
-      box.appendChild(button(t.name, `${t.coins} coins · ${hidden} card${hidden === 1 ? "" : "s"}`, BTN_NEUTRAL, () => {
-        if (spec.guess) { menu.target = t.id; renavigate(s); return; }
+      box.appendChild(button(t.name, `${t.coins} coins · ${hidden} card${hidden === 1 ? "" : "s"}`, BTN_NEUTRAL + " !min-h-[56px] !text-lg", () => {
+        if (menu.action === "coup" && getSettings(s).coupGuess) { menu.target = t.id; renavigate(s); return; }
         sendIntent({ type: "action", action: menu.action, target: t.id });
         resetMenu();
       }));
@@ -1059,7 +1202,7 @@ function renderActionMenu(s, me, box, head) {
   box.appendChild(button("‹ Back", null, BTN_BACK, () => { menu.target = null; renavigate(s); }));
   const grid = el(`<div class="grid grid-cols-2 gap-2"></div>`);
   for (const role of ROLES) {
-    grid.appendChild(button(`${ROLE_SYMBOL[role]} ${role}`, "right: they lose it · wrong: coup fails", BTN_DANGER, () => {
+    grid.appendChild(button(`${ROLE_SYMBOL[role]} ${role}`, "right: they lose it · wrong: coup fails", BTN_DANGER + " !min-h-[56px] !text-lg", () => {
       sendIntent({ type: "action", action: "coup", target: menu.target, guess: role });
       resetMenu();
     }));
@@ -1143,13 +1286,13 @@ function renderTable(s, turnP) {
     const hiddenCount = p.cards.filter((c) => !c.revealed).length;
     const isMe = p.id === session.playerId;
     ul.appendChild(el(`
-      <li class="border ${isTurn ? "border-sun" : "border-line"} ${alive ? "" : "opacity-45"} rounded-lg bg-panel px-3 py-2">
-        <p class="text-base font-bold flex items-center gap-1.5">
+      <li class="border ${isTurn ? "border-sun" : "border-line"} ${alive ? "" : "opacity-45"} rounded-md bg-panel px-2 py-1.5">
+        <p class="text-sm font-bold flex items-center gap-1">
           ${isTurn ? `<span class="text-sun" aria-label="taking turn">▶</span>` : ""}
           <span class="truncate">${esc(p.name)}${isMe ? " (you)" : ""}</span>
-          ${alive ? "" : `<span class="text-alert text-xs font-bold ml-auto shrink-0">OUT</span>`}
+          ${alive ? "" : `<span class="text-alert text-[10px] font-bold ml-auto shrink-0">OUT</span>`}
         </p>
-        <p class="text-sm text-dim mt-0.5">
+        <p class="text-xs text-dim mt-0.5">
           ${p.coins}c · ${hiddenCount}🂠${lost.length ? ` · <span class="text-alert">${lost.join(", ")}</span>` : ""}
         </p>
       </li>`));
@@ -1177,6 +1320,17 @@ $("btn-start").addEventListener("click", () => sendIntent({ type: "start" }));
 
 $("btn-guide").addEventListener("click", () => $("guide-dialog").showModal());
 $("btn-guide-close").addEventListener("click", () => $("guide-dialog").close());
+$("btn-howto").addEventListener("click", () => $("howto-dialog").showModal());
+$("btn-howto-close").addEventListener("click", () => $("howto-dialog").close());
+$("header-code").addEventListener("click", async () => {
+  const chip = $("header-code");
+  try {
+    await navigator.clipboard.writeText(session.code);
+    const code = session.code;
+    chip.textContent = "Copied!";
+    setTimeout(() => { chip.textContent = code; }, 1100);
+  } catch { /* clipboard unavailable: the code is still visible/selectable */ }
+});
 
 window.addEventListener("beforeunload", () => {
   if (session.channel) sb.removeChannel(session.channel);
