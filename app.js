@@ -29,14 +29,23 @@ const DEFAULT_SETTINGS = {
   coupGuess:    true, // true: attacker guesses a card · false: classic (target chooses)
 };
 const SETTING_OPTIONS = {
-  reactionSecs: { label: "Reaction time",  unit: "s", values: [10, 15, 20, 30] },
-  decideSecs:   { label: "Decision time",  unit: "s", values: [15, 30, 45, 60] },
-  turnSecs:     { label: "Turn timer",     unit: "s", values: [0, 30, 60, 90] },
+  reactionSecs: { label: "Reaction time",  unit: "s", values: [10, 15, 20, 30, 0], zeroName: "∞" },
+  decideSecs:   { label: "Decision time",  unit: "s", values: [15, 30, 45, 60, 0], zeroName: "∞" },
+  turnSecs:     { label: "Turn timer",     unit: "s", values: [0, 30, 60, 90],     zeroName: "Off" },
   startCoins:   { label: "Starting coins", unit: "",  values: [1, 2, 3] },
   coupGuess:    { label: "Coup style",     unit: "",  values: [true, false],
                   names: { true: "Guess a card", false: "Classic" } },
 };
 function getSettings(s) { return { ...DEFAULT_SETTINGS, ...((s && s.settings) || {}) }; }
+
+// Open a timed window. secs = 0 means "no limit": the window only resolves
+// when everyone has explicitly responded (or the player decides).
+function armWindow(s, kind) {
+  const st = getSettings(s);
+  const secs = kind === "reaction" ? st.reactionSecs : st.decideSecs;
+  s.openedAt = Date.now();
+  s.deadlineAt = secs > 0 ? Date.now() + secs * 1000 : null;
+}
 
 const ARM_DELAY_MS = 1200; // reaction buttons stay disabled briefly to prevent misclicks
 
@@ -535,7 +544,7 @@ function doAction(s, pid, action, targetId, guess) {
     passes: [],
   };
   s.phase = "reaction";
-  s.deadlineAt = Date.now() + getSettings(s).reactionSecs * 1000;
+  armWindow(s, "reaction");
 
   hostLog(`${actor.name}: ${actionPhrase(action, target ? target.name : "")}.`);
   return true;
@@ -595,7 +604,7 @@ function doBlock(s, pid, role) {
   s.pending.block = { by: pid, role };
   s.phase = "block_reaction";
   s.pending.passes = [];
-  s.deadlineAt = Date.now() + getSettings(s).reactionSecs * 1000;
+  armWindow(s, "reaction");
   hostLog(`${blocker.name} blocks with ${role}.`);
   return true;
 }
@@ -671,7 +680,7 @@ function processLossQueue(s) {
     // Player must choose which card to give up
     s.phase = "lose_card";
     s.losingId = pid;
-    s.deadlineAt = Date.now() + getSettings(s).decideSecs * 1000;
+    armWindow(s, "decide");
     return false;
   }
   runContinuation(s);
@@ -720,7 +729,7 @@ function runContinuation(s) {
         s.phase = "reaction";
         s.pending.canChallenge = false;
         s.pending.passes = [];
-        s.deadlineAt = Date.now() + getSettings(s).reactionSecs * 1000;
+        armWindow(s, "reaction");
       } else {
         resolveAction(s);
       }
@@ -783,7 +792,7 @@ function resolveAction(s) {
       const drawn = [s.deck.pop(), s.deck.pop()];
       s.exchange = { playerId: actorId, drawn };
       s.phase = "exchange";
-      s.deadlineAt = Date.now() + getSettings(s).decideSecs * 1000;
+      armWindow(s, "decide");
       break;
     }
     default:
@@ -874,6 +883,7 @@ function maybeFx(s) {
   const overlay = $("fx-overlay");
   const card = $("fx-card");
   card.textContent = s.fx.text;
+  card.classList.toggle("fx-big", s.fx.text.includes("🏆"));
   overlay.hidden = false;
   card.classList.remove("fx-pop");
   void card.offsetWidth; // restart the animation
@@ -895,9 +905,10 @@ function renderLobby() {
     const isHost = p.id === session.game.host_player_id;
     const isMe = p.id === session.playerId;
     ul.appendChild(el(`
-      <li class="border border-line rounded-lg px-3 py-2 bg-panel flex justify-between gap-2">
+      <li class="border border-line rounded-lg px-2.5 py-2 bg-panel flex items-center gap-2">
+        ${avatarHtml(p.name, "w-6 h-6 text-xs")}
         <span class="font-bold truncate">${esc(p.name)}${isMe ? " (you)" : ""}</span>
-        ${isHost ? `<span class="text-sun shrink-0">★</span>` : ""}
+        ${isHost ? `<span class="text-sun shrink-0 ml-auto" title="Host">★</span>` : ""}
       </li>`));
   }
 
@@ -920,7 +931,7 @@ function renderLobbySettings() {
   for (const [key, opt] of Object.entries(SETTING_OPTIONS)) {
     const row = el(`<div class="flex items-center gap-2 mb-1.5"></div>`);
     row.appendChild(el(`<span class="text-sm text-dim w-28 shrink-0">${opt.label}</span>`));
-    const valName = (v) => opt.names ? opt.names[v] : (v === 0 ? "Off" : v + opt.unit);
+    const valName = (v) => opt.names ? opt.names[v] : (v === 0 ? (opt.zeroName || "Off") : v + opt.unit);
 
     if (!session.isHost) {
       row.appendChild(el(`<span class="text-sm font-bold">${valName(st[key])}</span>`));
@@ -1113,7 +1124,7 @@ function renderDecisions(s, me) {
       box.appendChild(button("Pass", "do nothing", BTN_NEUTRAL, () => sendIntent({ type: "pass" })));
       // Disable the committing buttons for a beat after the window opens, so a
       // tap aimed at the previous screen can't land on Challenge by accident.
-      const openedAt = s.deadlineAt - getSettings(s).reactionSecs * 1000;
+      const openedAt = s.openedAt || (s.deadlineAt ? s.deadlineAt - getSettings(s).reactionSecs * 1000 : 0);
       const armIn = openedAt + ARM_DELAY_MS - Date.now();
       if (armIn > 0 && armed.length) {
         armed.forEach((b) => { b.disabled = true; b.classList.add("opacity-40"); });
@@ -1149,11 +1160,22 @@ function renderDecisions(s, me) {
     head.textContent = "WAITING…";
   }
 
+  // Your-move state: glow the banner and animate the fresh prompt in
+  const bannerBox = $("banner-box");
+  if (bannerBox) {
+    bannerBox.className = promptKey
+      ? "mb-3 border-2 border-sun rounded-xl bg-panel px-3.5 py-2.5 transition-shadow shadow-[0_0_26px_rgba(255,214,10,0.16)]"
+      : "mb-3 border-2 border-line rounded-xl bg-panel px-3.5 py-2.5 transition-shadow";
+  }
+
   // Move keyboard focus to the first new prompt meant for this player
   if (promptKey && promptKey !== session.lastPromptKey) {
     session.lastPromptKey = promptKey;
+    box.classList.add("rise");
     const first = box.querySelector("button");
     if (first) first.focus();
+  } else if (!promptKey) {
+    box.classList.remove("rise");
   }
 }
 
@@ -1252,6 +1274,16 @@ function renderExchangePicker(s, me, box) {
   box.appendChild(confirm);
 }
 
+function nameHue(name) {
+  let h = 0;
+  for (const ch of String(name)) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  return h;
+}
+function avatarHtml(name, size) {
+  const cls = size || "w-5 h-5 text-[10px]";
+  return `<span class="inline-flex items-center justify-center ${cls} rounded-full font-bold text-ink shrink-0" style="background:hsl(${nameHue(name)} 62% 70%)" aria-hidden="true">${esc(String(name)[0].toUpperCase())}</span>`;
+}
+
 function button(label, sub, cls, onClick) {
   const b = el(`<button type="button" class="${cls}"></button>`);
   b.appendChild(document.createTextNode(label));
@@ -1269,7 +1301,7 @@ function renderHand(s, me) {
   $("my-coins").textContent = me.coins;
   for (const c of me.cards) {
     ul.appendChild(el(`
-      <li class="flex-1 border ${c.revealed ? "border-line opacity-50" : "border-sun/70"} rounded-lg bg-card px-3 py-2.5">
+      <li class="flex-1 border ${c.revealed ? "border-line opacity-50" : "border-sun/70 shadow-[0_0_16px_rgba(255,214,10,0.10)]"} rounded-lg bg-card px-3 py-2.5">
         <p class="text-base font-bold"><span aria-hidden="true">${ROLE_SYMBOL[c.role]}</span> ${c.role}</p>
         <p class="text-xs text-dim mt-0.5">${c.revealed ? "lost — face up" : "hidden"}</p>
       </li>`));
@@ -1286,14 +1318,15 @@ function renderTable(s, turnP) {
     const hiddenCount = p.cards.filter((c) => !c.revealed).length;
     const isMe = p.id === session.playerId;
     ul.appendChild(el(`
-      <li class="border ${isTurn ? "border-sun" : "border-line"} ${alive ? "" : "opacity-45"} rounded-md bg-panel px-2 py-1.5">
-        <p class="text-sm font-bold flex items-center gap-1">
-          ${isTurn ? `<span class="text-sun" aria-label="taking turn">▶</span>` : ""}
+      <li class="border ${isTurn ? "border-sun shadow-[0_0_14px_rgba(255,214,10,0.12)]" : "border-line"} ${alive ? "" : "opacity-40 grayscale"} rounded-md bg-panel px-2 py-1.5">
+        <p class="text-sm font-bold flex items-center gap-1.5">
+          ${avatarHtml(p.name)}
           <span class="truncate">${esc(p.name)}${isMe ? " (you)" : ""}</span>
+          ${isTurn ? `<span class="text-sun ml-auto shrink-0" aria-label="taking turn">▶</span>` : ""}
           ${alive ? "" : `<span class="text-alert text-[10px] font-bold ml-auto shrink-0">OUT</span>`}
         </p>
         <p class="text-xs text-dim mt-0.5">
-          ${p.coins}c · ${hiddenCount}🂠${lost.length ? ` · <span class="text-alert">${lost.join(", ")}</span>` : ""}
+          🜚 ${p.coins} · 🂠 ${hiddenCount}${lost.length ? ` · <span class="text-alert">${lost.join(", ")}</span>` : ""}
         </p>
       </li>`));
   }

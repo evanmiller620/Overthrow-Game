@@ -256,5 +256,26 @@ session.hostState = s;
 G.hostHandleTimeout();
 check("at 10+ coins the timeout forces a Coup (7 paid)", A(s).coins === 3);
 
+// ---------- T14: no-limit windows ----------
+console.log("T14 reaction/decision time = 0 means no deadline, all-pass still resolves");
+s = newGame(3);
+s.settings.reactionSecs = 0;
+s.settings.decideSecs = 0;
+G.doAction(s, "p0", "tax");
+check("reaction window open with no deadline", s.phase === "reaction" && s.deadlineAt === null);
+check("openedAt recorded for the misclick guard", typeof s.openedAt === "number");
+G.doPass(s, "p1");
+G.doPass(s, "p2");
+check("all-pass still resolves: +3", A(s).coins === 5);
+
+s.settings.coupGuess = false;
+B(s).coins = 7;
+A(s).cards = [{ role: "Duke", revealed: false }, { role: "Captain", revealed: false }];
+G.doAction(s, "p1", "coup", "p0");
+check("untimed decision window opens", s.phase === "lose_card" && s.losingId === "p0");
+check("decision window has no deadline", s.deadlineAt === null);
+G.doLose(s, "p0", 0);
+check("player decision still resolves it", s.phase === "action");
+
 console.log(failures === 0 ? "\nALL TESTS PASSED" : `\n${failures} FAILURES`);
 process.exit(failures ? 1 : 0);

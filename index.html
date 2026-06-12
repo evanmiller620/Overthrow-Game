@@ -36,7 +36,22 @@
 
   <style>
     html { font-size: 16px; }
-    body { font-family: 'Atkinson Hyperlegible', Inter, system-ui, sans-serif; }
+    body {
+      font-family: 'Atkinson Hyperlegible', Inter, system-ui, sans-serif;
+      background-image:
+        radial-gradient(60rem 28rem at 50% -12rem, rgba(255,214,10,0.07), transparent 70%),
+        radial-gradient(48rem 32rem at 110% 110%, rgba(255,214,10,0.04), transparent 65%);
+      background-attachment: fixed;
+    }
+
+    /* The hidden attribute always wins — even against Tailwind display utilities
+       (this was letting the FX overlay's `flex` class show an empty box). */
+    [hidden] { display: none !important; }
+
+    /* Gentle entrance for freshly-rendered decision prompts */
+    @keyframes rise { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
+    .rise { animation: rise 0.26s ease both; }
+    @media (prefers-reduced-motion: reduce) { .rise { animation: none; } }
 
     :focus-visible { outline: 3px solid #FFD60A; outline-offset: 2px; border-radius: 6px; }
 
@@ -65,8 +80,12 @@
     @media (prefers-reduced-motion: reduce) { .fx-pop { animation: none; } }
 
     /* subtle lift for tappable things */
-    button { transition: transform 80ms ease, filter 120ms ease; }
-    button:active { transform: scale(0.97); }
+    button { transition: transform 90ms ease, filter 120ms ease, border-color 120ms ease, box-shadow 150ms ease; }
+    button:not(:disabled):hover { transform: translateY(-1px); }
+    button:not(:disabled):active { transform: scale(0.97); }
+    @media (prefers-reduced-motion: reduce) { button { transition: none; } }
+
+    .fx-big { font-size: 1.6rem; box-shadow: 0 0 90px rgba(255,214,10,0.45); }
   </style>
 </head>
 
@@ -76,7 +95,7 @@
     Skip to main content
   </a>
 
-  <header class="border-b border-line">
+  <header class="sticky top-0 z-30 border-b border-line/70 bg-ink/85 backdrop-blur">
     <div class="max-w-xl mx-auto px-4 py-2.5 flex items-center justify-between gap-3">
       <h1 class="text-lg font-bold tracking-[0.25em] text-sun">◆ COUP</h1>
       <div class="flex items-center gap-2">
@@ -110,13 +129,18 @@
     <section id="screen-landing" hidden aria-labelledby="landing-h">
       <h2 id="landing-h" class="sr-only">Play with friends</h2>
 
+      <div class="text-center mt-3 mb-8">
+        <p class="text-4xl font-bold leading-tight tracking-tight">Bluff your way<br /><span class="text-sun">to the throne.</span></p>
+        <p class="text-dim mt-2 text-sm">2–6 players · one shared room code · no accounts</p>
+      </div>
+
       <label for="player-name" class="block text-sm font-bold text-dim mb-1.5">YOUR NAME</label>
       <input id="player-name" type="text" maxlength="20" autocomplete="nickname"
         class="w-full bg-panel border-2 border-line rounded-lg px-3 py-2.5 text-lg text-mist placeholder:text-line mb-5 focus:border-mist"
         placeholder="e.g. Sam" />
 
       <button id="btn-create" type="button"
-        class="min-h-[52px] w-full text-lg font-bold bg-sun text-ink rounded-xl px-5 py-3 hover:brightness-110 mb-5">
+        class="min-h-[54px] w-full text-lg font-bold bg-gradient-to-b from-sun to-[#E9B900] text-ink rounded-xl px-5 py-3 shadow-[0_4px_22px_rgba(255,214,10,0.18)] hover:brightness-105 mb-5">
         Create game
       </button>
 
@@ -164,7 +188,7 @@
       <h2 id="game-h" class="sr-only">Game in progress</h2>
 
       <!-- Turn banner + countdown, one compact block -->
-      <div class="mb-3 border-2 border-sun/70 rounded-xl bg-panel px-3.5 py-2.5">
+      <div id="banner-box" class="mb-3 border-2 border-line rounded-xl bg-panel px-3.5 py-2.5 transition-shadow">
         <div id="turn-banner" role="status" aria-live="polite" class="text-base font-bold leading-snug"></div>
         <div id="countdown-wrap" class="mt-2" hidden>
           <div class="flex items-center gap-2">
@@ -205,7 +229,7 @@
 
   <!-- Big-moment overlay (decorative; the log announces events to screen readers) -->
   <div id="fx-overlay" hidden aria-hidden="true"
-    class="fixed inset-0 z-40 flex items-center justify-center pointer-events-none px-6">
+    class="fixed inset-0 z-40 flex items-center justify-center pointer-events-none px-6 bg-ink/40 backdrop-blur-[1.5px]">
     <div id="fx-card"
       class="bg-panel border-2 border-sun rounded-2xl px-6 py-4 text-xl font-bold text-center shadow-[0_0_60px_rgba(255,214,10,0.25)]">
     </div>

@@ -49,14 +49,15 @@ here port directly into a Vite + Tailwind CLI setup.
 
 1. **Create game** → a 4-character room code (lookalike letters like O/0 and I/1 are excluded).
 2. Friends **Join** with the code. In the lobby the host can tune the game: reaction
-   time (10–30s), decision time (15–60s), an optional per-turn timer (off/30/60/90s —
+   time (10–30s or no limit), decision time (15–60s or no limit), an optional per-turn timer (off/30/60/90s —
    a timed-out player auto-takes Income, or a forced Coup at 10+ coins), starting coins
    (1–3), and the Coup style (guess-a-card vs classic target-chooses). Settings survive
    rematches. The host presses **Start game** with 2–6 players.
 3. On your turn, pick an action from the grid; targeted actions open a second screen to
    pick the target (and Coup a third to guess a card, when that rule is on). Role actions
    open a reaction window where other players can **Challenge** or **Block** — it ends
-   early as soon as everyone has passed, otherwise the action resolves on timeout. The
+   early as soon as everyone has passed, otherwise the action resolves on timeout (with
+   no-limit windows, only explicit responses resolve it). The
    Challenge/Block buttons stay disabled for ~1 second after the window opens so a tap
    aimed at the previous screen can't fire one by accident.
 4. Choosing a card to lose, and Ambassador exchanges, have a 30-second window with a
