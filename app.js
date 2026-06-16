@@ -31,7 +31,7 @@ const DEFAULT_SETTINGS = {
 const SETTING_OPTIONS = {
   reactionSecs: { label: "Reaction time",  unit: "s", values: [10, 15, 20, 30, 0], zeroName: "∞" },
   decideSecs:   { label: "Decision time",  unit: "s", values: [15, 30, 45, 60, 0], zeroName: "∞" },
-  turnSecs:     { label: "Turn timer",     unit: "s", values: [0, 30, 60, 90],     zeroName: "Off" },
+  turnSecs:     { label: "Turn timer",     unit: "s", values: [0, 8, 30, 60, 90],     zeroName: "Off" },
   startCoins:   { label: "Starting coins", unit: "",  values: [1, 2, 3] },
   coupGuess:    { label: "Coup style",     unit: "",  values: [true, false],
                   names: { true: "Guess a card", false: "Classic" } },
